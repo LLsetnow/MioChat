@@ -2,9 +2,9 @@
   <div class="chat-bubbles" ref="container">
     <div
       v-for="(msg, idx) in messages"
-      :key="idx"
+      :key="msg.msgId || idx"
       class="bubble-wrapper"
-      :class="msg.role"
+      :class="[msg.role, { 'new-msg': idx === messages.length - 1 }]"
     >
       <div class="bubble" :class="[msg.role, { interrupted: msg.interrupted }]">
         <span class="bubble-text" v-html="formatText(msg.text)"></span>
@@ -73,6 +73,9 @@ watch(
 
 .bubble-wrapper {
   display: flex;
+}
+
+.bubble-wrapper.new-msg {
   animation: fadeInUp 0.3s ease;
 }
 

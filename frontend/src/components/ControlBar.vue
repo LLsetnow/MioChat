@@ -29,7 +29,7 @@
       </button>
       <button
         class="btn send-btn"
-        :disabled="isInputDisabled || !textInput.trim()"
+        :disabled="isSendDisabled"
         @click="handleSendText"
       >
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
@@ -61,19 +61,17 @@ const emit = defineEmits(['send-text', 'start-voice', 'stop-voice', 'open-settin
 
 const textInput = ref('')
 
-const isInputDisabled = computed(() => props.isRecording || props.state === 'thinking' || props.state === 'speaking')
-const isMicDisabled = computed(() => props.state === 'thinking' || props.state === 'speaking')
+const isInputDisabled = computed(() => props.isRecording)
+const isSendDisabled = computed(() => !textInput.value.trim())
 
 const inputPlaceholder = computed(() => {
   if (props.isRecording) return '录音中...'
-  if (props.state === 'thinking') return 'AI 思考中...'
-  if (props.state === 'speaking') return 'AI 说话中...'
   return '输入消息...'
 })
 
 function handleSendText() {
   const text = textInput.value.trim()
-  if (!text || isInputDisabled.value) return
+  if (!text) return
   emit('send-text', { text })
   textInput.value = ''
 }

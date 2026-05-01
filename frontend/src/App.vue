@@ -116,6 +116,7 @@ const avatarUrl = ref('/img/gpt_img_20260430_210021.png')
 // 当前正在生成的 AI 消息（用于打断标记）
 let currentAiMsgIdx = -1
 let _initialConfigApplied = false
+let _msgIdCounter = 0
 
 // ── 文本格式化 ───────────────────────────────────────────────
 
@@ -159,7 +160,7 @@ ws.on('asr_partial', (msg) => {
 
 ws.on('asr_final', (msg) => {
   asrPartial.value = ''
-  messages.value.push({ role: 'user', text: msg.text })
+  messages.value.push({ role: 'user', text: msg.text, msgId: ++_msgIdCounter })
 })
 
 ws.on('llm_delta', (msg) => {
@@ -176,7 +177,7 @@ ws.on('llm_done', () => {
         .replace(/<好感(?:变化)?[：:]\s*[+-]?\d+>/g, '')
         .replace(/<信任(?:变化)?[：:]\s*[+-]?\d+>/g, '')
     ).trim()
-    messages.value.push({ role: 'assistant', text: cleaned || llmPartial.value, interrupted: false })
+    messages.value.push({ role: 'assistant', text: cleaned || llmPartial.value, interrupted: false, msgId: ++_msgIdCounter })
     currentAiMsgIdx = messages.value.length - 1
   }
   llmPartial.value = ''
@@ -203,7 +204,7 @@ ws.on('emotion', (msg) => {
 
 ws.on('error', (msg) => {
   console.error('[Error]', msg.message)
-  messages.value.push({ role: 'system', text: `错误: ${msg.message}` })
+  messages.value.push({ role: 'system', text: `错误: ${msg.message}`, msgId: ++_msgIdCounter })
 })
 
 // ── 连接状态 ──────────────────────────────────────────────
@@ -224,7 +225,7 @@ function handleSendText({ text }) {
     doInterrupt()
   }
 
-  messages.value.push({ role: 'user', text })
+  messages.value.push({ role: 'user', text, msgId: ++_msgIdCounter })
   ws.send({ type: 'text_input', text })
 }
 
