@@ -520,7 +520,6 @@ _MIME_MAP = {
 
 def _guess_mime(path: Path):
     return _MIME_MAP.get(path.suffix.lower(), ("application/octet-stream", None))
-    return mime_map.get(ext, "application/octet-stream")
 
 
 async def api_voices(request):
@@ -530,6 +529,12 @@ async def api_voices(request):
     model = request.query.get("model", "")
     voices = list_voices(api_key, model=model)
     return web.json_response(voices)
+
+
+async def api_character(request):
+    """GET /api/character — 返回角色信息（姓名、头像路径）"""
+    from src.llm_client import get_character_info
+    return web.json_response(get_character_info())
 
 
 async def static_files(request):
@@ -640,6 +645,7 @@ def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
 
     # API 路由
     app.router.add_get("/api/voices", api_voices)
+    app.router.add_get("/api/character", api_character)
 
     # WebSocket 路由
     app.router.add_get("/ws/voice-chat", ws_voice_chat)

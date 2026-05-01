@@ -29,6 +29,8 @@
             :state="currentState"
             :affection="affection"
             :trust="trust"
+            :charName="charName"
+            :avatarUrl="avatarUrl"
           />
         </div>
 
@@ -106,6 +108,10 @@ const llmPartial = ref('')
 const micVolume = ref(0)
 const settingsVisible = ref(false)
 const voices = ref([])
+
+// 角色信息（从 /api/character 加载）
+const charName = ref('Mio')
+const avatarUrl = ref('/img/gpt_img_20260430_210021.png')
 
 // 当前正在生成的 AI 消息（用于打断标记）
 let currentAiMsgIdx = -1
@@ -322,6 +328,18 @@ onMounted(async () => {
   // 设置麦克风设备
   if (settings.selectedDeviceId.value) {
     mic.selectedDeviceId.value = settings.selectedDeviceId.value
+  }
+
+  // 加载角色信息
+  try {
+    const res = await fetch('/api/character')
+    if (res.ok) {
+      const info = await res.json()
+      if (info.name) charName.value = info.name
+      if (info.avatar) avatarUrl.value = info.avatar
+    }
+  } catch (e) {
+    console.warn('[角色] 无法加载角色信息:', e)
   }
 })
 </script>

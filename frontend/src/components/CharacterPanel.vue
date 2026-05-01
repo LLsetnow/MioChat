@@ -2,7 +2,7 @@
   <div class="character-panel">
     <div class="character-avatar" :class="stateClass">
       <div class="avatar-glow" />
-      <img src="/img/gpt_img_20260430_210021.png" alt="Mio" class="avatar-img" />
+      <img :src="avatarUrl" :alt="charName" class="avatar-img" />
     </div>
 
     <div class="affection-bar">
@@ -34,6 +34,8 @@ const props = defineProps({
   state: { type: String, default: 'idle' },
   affection: { type: Number, default: 0 },
   trust: { type: Number, default: 0 },
+  charName: { type: String, default: 'Mio' },
+  avatarUrl: { type: String, default: '/img/gpt_img_20260430_210021.png' },
 })
 
 const stateClass = computed(() => props.state)
