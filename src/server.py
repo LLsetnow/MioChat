@@ -592,6 +592,11 @@ async def ws_voice_chat(request):
 # ── 启动服务 ───────────────────────────────────────────────────────
 
 
+async def health(request):
+    """健康检查端点（Railway 用）"""
+    return web.json_response({"status": "ok"})
+
+
 def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
     logger = setup_logger("voice-chat")
     logger.info("=== Real-time-voice 服务启动 ===")
@@ -615,6 +620,9 @@ def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
 
     app = web.Application()
 
+    # 健康检查
+    app.router.add_get("/health", health)
+
     # API 路由
     app.router.add_get("/api/voices", api_voices)
 
@@ -630,9 +638,25 @@ def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
     app.router.add_get("/{path:.*}", static_files)
 
     logger.info(f"服务就绪 → ws://{host}:{port}/ws/voice-chat")
-    logger.info("按 Ctrl+C 停止服务")
 
-    web.run_app(app, host=host, port=port, print=None)
+    # 使用 async 启动（更可靠，兼容 Railway 等容器环境）
+    async def _run():
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, host, port)
+        await site.start()
+        logger.info(f"服务已启动: http://{host}:{port}")
+        logger.info("按 Ctrl+C 停止服务")
+        # 保持运行
+        await asyncio.Event().wait()
+
+    try:
+        asyncio.run(_run())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("服务已停止")
+    except Exception as e:
+        logger.error(f"服务启动失败: {e}")
+        raise
 
 
 if __name__ == "__main__":
