@@ -522,22 +522,8 @@ async def api_voices(request):
 
 
 async def static_root(request):
-    """GET / — 返回 index.html 或调试信息"""
-    static_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-    if not static_dir.exists():
-        static_dir = Path(__file__).resolve().parent.parent / "frontend"
-
-    index_path = static_dir / "index.html"
-    if index_path.exists():
-        body = index_path.read_bytes()
-        return web.Response(body=body, content_type="text/html; charset=utf-8")
-
-    return web.json_response({
-        "status": "deployed",
-        "frontend": static_dir.exists(),
-        "dist": (Path(__file__).resolve().parent.parent / "frontend" / "dist").exists(),
-        "index_html": index_path.exists(),
-    })
+    """GET / — 简单欢迎页"""
+    return web.Response(text="<h1>MioChat is running</h1><p>" + str(Path(__file__).resolve().parent.parent / "frontend" / "dist") + "</p>", content_type="text/html")
 
 
 async def static_files(request):
