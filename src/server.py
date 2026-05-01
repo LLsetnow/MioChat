@@ -63,6 +63,15 @@ def _mkmsg(**kwargs) -> str:
     return json.dumps(kwargs, ensure_ascii=False)
 
 
+def _resolve_tts_model(voice: str, current_model: str) -> str:
+    """从音色 ID 推断实际 TTS 模型（克隆音色编码了模型版本）"""
+    for ver in ("v3.5-plus", "v3.5-flash", "v3-plus", "v3-flash", "v2"):
+        prefix = f"cosyvoice-{ver}-"
+        if voice.startswith(prefix):
+            return f"cosyvoice-{ver}"
+    return current_model
+
+
 async def _send_json(ws, **kwargs):
     await ws.send_str(_mkmsg(**kwargs))
 
@@ -404,11 +413,15 @@ class VoiceChatSession:
             sent_start = False
             pcm_samples_this_segment = 0
 
+            # 从音色 ID 自动推断模型（克隆音色可能自带版本信息）
+            actual_model = _resolve_tts_model(self.tts_voice, self.tts_model)
+            if actual_model != self.tts_model:
+                self.logger.debug(f"[TTS] 自动切换模型: {self.tts_model} → {actual_model}（音色 {self.tts_voice}）")
             # 在线程池中运行同步 TTS，逐块取回结果
             gen = generate_tts_stream(
                 text=text,
                 voice=self.tts_voice,
-                model=self.tts_model,
+                model=actual_model,
                 api_key=self.tts_api_key,
                 instruction=self.tts_instruction,
             )
@@ -484,6 +497,11 @@ class VoiceChatSession:
     async def _handle_update_config(self, msg):
         if "voice" in msg:
             self.tts_voice = msg["voice"]
+            # 根据音色自动同步模型
+            auto_model = _resolve_tts_model(self.tts_voice, self.tts_model)
+            if auto_model != self.tts_model:
+                self.tts_model = auto_model
+                self.logger.info(f"[会话] 音色变更，模型自动同步为: {self.tts_model}")
         if "instruction" in msg:
             self.tts_instruction = msg.get("instruction", "")
         if "asr_model" in msg:
