@@ -521,44 +521,30 @@ async def api_voices(request):
     return web.json_response(voices)
 
 
-async def static_root(request):
-    """GET / — 查看前端构建状态"""
-    dist_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-    frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
-    html_path = dist_dir / "index.html"
-    files = []
-    if dist_dir.exists():
-        files = [str(p.relative_to(dist_dir)) for p in dist_dir.rglob("*") if p.is_file()][:20]
-    body = f"""<h1>MioChat is running</h1>
-<p>dist exists: {dist_dir.exists()}</p>
-<p>frontend exists: {frontend_dir.exists()}</p>
-<p>index.html: {html_path.exists()}</p>
-<p>files ({len(files)}): {files}</p>
-"""
-    return web.Response(text=body, content_type="text/html")
-
-
 async def static_files(request):
     """静态文件服务 + SPA fallback"""
-    static_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-    if not static_dir.exists():
-        static_dir = Path(__file__).resolve().parent.parent / "frontend"
+    try:
+        static_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+        if not static_dir.exists():
+            static_dir = Path(__file__).resolve().parent.parent / "frontend"
 
-    path = request.match_info.get("path", "") or "index.html"
+        path = request.match_info.get("path", "") or "index.html"
 
-    file_path = static_dir / path.lstrip("/")
-    if file_path.exists() and file_path.is_file():
-        content_type = _guess_mime(file_path)
-        body = file_path.read_bytes()
-        return web.Response(body=body, content_type=content_type)
+        file_path = static_dir / path.lstrip("/")
+        if file_path.exists() and file_path.is_file():
+            content_type = _guess_mime(file_path)
+            body = file_path.read_bytes()
+            return web.Response(body=body, content_type=content_type)
 
-    # SPA fallback
-    index_path = static_dir / "index.html"
-    if index_path.exists():
-        body = index_path.read_bytes()
-        return web.Response(body=body, content_type="text/html")
+        # SPA fallback
+        index_path = static_dir / "index.html"
+        if index_path.exists():
+            body = index_path.read_bytes()
+            return web.Response(body=body, content_type="text/html")
 
-    return web.Response(status=404, text="Not Found")
+        return web.Response(status=404, text="Not Found")
+    except Exception as e:
+        return web.Response(status=500, text=f"static error: {e}")
 
 
 # ── WebSocket 处理 ──────────────────────────────────────────────────
@@ -643,9 +629,6 @@ def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
 
     # API 路由
     app.router.add_get("/api/voices", api_voices)
-
-    # 根路径（用于检查静态文件问题）
-    app.router.add_get("/", static_root)
 
     # WebSocket 路由
     app.router.add_get("/ws/voice-chat", ws_voice_chat)
