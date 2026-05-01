@@ -49,7 +49,7 @@ cp .env.example .env
 # 编辑 .env 填入你的 API Key
 
 # 启动服务
-python server.py
+python src/server.py
 ```
 
 ### 前端
@@ -81,11 +81,12 @@ npm run dev
 
 ```
 MioChat/
-├── server.py          # WebSocket + HTTP 主服务
-├── asr_client.py      # 语音识别客户端 (DashScope Fun-ASR)
-├── llm_client.py      # LLM 对话客户端
-├── tts_client.py      # 语音合成客户端 (CosyVoice)
-├── logger.py          # 日志工具
+├── src/               # 后端 Python 源码
+│   ├── server.py      # WebSocket + HTTP 主服务
+│   ├── asr_client.py  # 语音识别客户端 (DashScope Fun-ASR)
+│   ├── llm_client.py  # LLM 对话客户端
+│   ├── tts_client.py  # 语音合成客户端 (CosyVoice)
+│   └── logger.py      # 日志工具
 ├── requirements.txt   # Python 依赖
 ├── .env.example       # 环境变量模板
 └── frontend/          # Vue 3 前端

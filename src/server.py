@@ -8,11 +8,11 @@ from pathlib import Path
 
 from aiohttp import web
 
-from logger import setup_logger, get_logger
+from src.logger import setup_logger, get_logger
 
 # 加载 .env（本目录）
 from dotenv import load_dotenv
-_ENV_PATH = Path(__file__).resolve().parent / ".env"
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 if _ENV_PATH.exists():
     load_dotenv(_ENV_PATH, override=False)
 
@@ -150,7 +150,7 @@ class VoiceChatSession:
                 pass
             self._current_asr = None
 
-        from asr_client import ASRClient
+        from src.asr_client import ASRClient
 
         self.state = STATE_LISTENING
         await _send_json(self.ws, type="status", state=STATE_LISTENING)
@@ -223,7 +223,7 @@ class VoiceChatSession:
         self._pending_trust = 0
 
         try:
-            from llm_client import generate_llm_stream, should_trigger_tts, extract_tts_chunks, extract_emotion_tags
+            from src.llm_client import generate_llm_stream, should_trigger_tts, extract_tts_chunks, extract_emotion_tags
 
             text_buffer = ""
             tts_queue = asyncio.Queue()
@@ -508,9 +508,9 @@ async def api_voices(request):
 
 async def static_files(request):
     """静态文件服务 + SPA fallback"""
-    static_dir = Path(__file__).resolve().parent / "frontend" / "dist"
+    static_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
     if not static_dir.exists():
-        static_dir = Path(__file__).resolve().parent / "frontend"
+        static_dir = Path(__file__).resolve().parent.parent / "frontend"
 
     path = request.match_info.get("path", "") or "index.html"
 
@@ -608,7 +608,7 @@ def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
     app.router.add_get("/ws/voice-chat", ws_voice_chat)
 
     # 图片目录（/img/ → 项目根 img/）
-    img_dir = Path(__file__).resolve().parent / "img"
+    img_dir = Path(__file__).resolve().parent.parent / "img"
     if img_dir.exists():
         app.router.add_static("/img", str(img_dir))
 
