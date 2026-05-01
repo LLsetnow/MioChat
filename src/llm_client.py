@@ -150,7 +150,7 @@ def should_trigger_tts(text_buffer: str) -> bool:
     if text_buffer[-1] in '，。！？、；：,.!?;:）)\n>':
         return True
     # 足够长时强制触发（让 TTS 尽早开始流式输出）
-    if len(text_buffer) >= 8:
+    if len(text_buffer) >= 20:
         return True
     return False
 
