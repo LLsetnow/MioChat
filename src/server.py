@@ -497,18 +497,20 @@ class VoiceChatSession:
 # ── HTTP 路由 ───────────────────────────────────────────────────────
 
 
-def _guess_mime(path: Path) -> str:
-    ext = path.suffix.lower()
-    mime_map = {
-        ".html": "text/html; charset=utf-8",
-        ".js": "application/javascript",
-        ".css": "text/css",
-        ".json": "application/json",
-        ".svg": "image/svg+xml",
-        ".png": "image/png",
-        ".ico": "image/x-icon",
-        ".woff2": "font/woff2",
-    }
+_MIME_MAP = {
+    ".html": ("text/html", "utf-8"),
+    ".js": ("application/javascript", None),
+    ".css": ("text/css", None),
+    ".json": ("application/json", None),
+    ".svg": ("image/svg+xml", None),
+    ".png": ("image/png", None),
+    ".ico": ("image/x-icon", None),
+    ".woff2": ("font/woff2", None),
+}
+
+
+def _guess_mime(path: Path):
+    return _MIME_MAP.get(path.suffix.lower(), ("application/octet-stream", None))
     return mime_map.get(ext, "application/octet-stream")
 
 
@@ -532,15 +534,15 @@ async def static_files(request):
 
         file_path = static_dir / path.lstrip("/")
         if file_path.exists() and file_path.is_file():
-            content_type = _guess_mime(file_path)
+            mime, cs = _guess_mime(file_path)
             body = file_path.read_bytes()
-            return web.Response(body=body, content_type=content_type)
+            return web.Response(body=body, content_type=mime, charset=cs)
 
         # SPA fallback
         index_path = static_dir / "index.html"
         if index_path.exists():
             body = index_path.read_bytes()
-            return web.Response(body=body, content_type="text/html")
+            return web.Response(body=body, content_type="text/html", charset="utf-8")
 
         return web.Response(status=404, text="Not Found")
     except Exception as e:
