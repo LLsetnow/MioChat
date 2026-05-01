@@ -149,8 +149,8 @@ def should_trigger_tts(text_buffer: str) -> bool:
     # 末尾有中英文标点或闭合括号/标签
     if text_buffer[-1] in '，。！？、；：,.!?;:）)\n>':
         return True
-    # 足够长且无未闭合括号时强制触发（防止超长无标点文本卡住）
-    if len(text_buffer) >= 50:
+    # 足够长时强制触发（让 TTS 尽早开始流式输出）
+    if len(text_buffer) >= 8:
         return True
     return False
 
