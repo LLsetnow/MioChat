@@ -379,7 +379,7 @@ class VoiceChatSession:
 
     async def _tts_synthesize(self, text: str):
         """执行单次 TTS 合成并发送音频（在线程池中运行同步 requests）"""
-        from tts_client import generate_tts_stream
+        from src.tts_client import generate_tts_stream
 
         if self._cancel_event.is_set():
             return
@@ -513,7 +513,7 @@ def _guess_mime(path: Path) -> str:
 
 async def api_voices(request):
     """GET /api/voices — 返回可用音色列表（支持 ?model= 过滤）"""
-    from tts_client import list_voices
+    from src.tts_client import list_voices
     api_key = os.environ.get("QWEN_TTS_API_KEY", "")
     model = request.query.get("model", "")
     voices = list_voices(api_key, model=model)
