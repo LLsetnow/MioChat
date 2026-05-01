@@ -165,6 +165,11 @@ def _query_clone_from_api(api_key: str) -> list[dict]:
 
 # ── 流式 TTS 合成 ──────────────────────────────────────────────────
 
+# 复用 HTTP 连接，减少跨洋 TCP+TLS 握手次数
+_tts_session = requests.Session()
+_tts_session.headers.update({"X-DashScope-SSE": "enable"})
+
+
 def generate_tts_stream(
     text: str,
     voice: str,
@@ -181,7 +186,6 @@ def generate_tts_stream(
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "X-DashScope-SSE": "enable",
     }
     input_obj = {
         "text": text,
@@ -196,7 +200,7 @@ def generate_tts_stream(
     body = {"model": model, "input": input_obj}
 
     t0 = time.time()
-    resp = requests.post(url, headers=headers, json=body, stream=True, timeout=120)
+    resp = _tts_session.post(url, headers=headers, json=body, stream=True, timeout=120)
     if resp.status_code != 200:
         raise RuntimeError(f"TTS HTTP {resp.status_code}: {resp.text[:300]}")
 
