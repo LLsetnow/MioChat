@@ -639,6 +639,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Real-time-voice 服务")
     parser.add_argument("--host", default=DEFAULT_HOST, help="绑定地址")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="绑定端口")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", DEFAULT_PORT)), help="绑定端口")
     args = parser.parse_args()
     main(args.host, args.port)

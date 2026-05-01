@@ -3,10 +3,10 @@
  */
 import { ref, onUnmounted } from 'vue'
 
-// 开发模式走 Vite 代理，生产模式直连后端
+// 开发模式走 Vite 代理，生产模式同域连接（前后端同端口）
 const WS_URL = import.meta.env.DEV
   ? `ws://${location.host}/ws/voice-chat`
-  : `ws://${location.hostname}:9902/ws/voice-chat`
+  : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/voice-chat`
 
 export function useWebSocket() {
   const ws = ref(null)
