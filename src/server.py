@@ -521,6 +521,25 @@ async def api_voices(request):
     return web.json_response(voices)
 
 
+async def static_root(request):
+    """GET / — 返回 index.html 或调试信息"""
+    static_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    if not static_dir.exists():
+        static_dir = Path(__file__).resolve().parent.parent / "frontend"
+
+    index_path = static_dir / "index.html"
+    if index_path.exists():
+        body = index_path.read_bytes()
+        return web.Response(body=body, content_type="text/html; charset=utf-8")
+
+    return web.json_response({
+        "status": "deployed",
+        "frontend": static_dir.exists(),
+        "dist": (Path(__file__).resolve().parent.parent / "frontend" / "dist").exists(),
+        "index_html": index_path.exists(),
+    })
+
+
 async def static_files(request):
     """静态文件服务 + SPA fallback"""
     static_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -626,6 +645,9 @@ def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
 
     # API 路由
     app.router.add_get("/api/voices", api_voices)
+
+    # 根路径（用于检查静态文件问题）
+    app.router.add_get("/", static_root)
 
     # WebSocket 路由
     app.router.add_get("/ws/voice-chat", ws_voice_chat)
