@@ -283,6 +283,12 @@ class VoiceChatSession:
                                     self._tts_chunk_texts.append(chunks[0])
                                     await tts_queue.put(chunks[0])
                                     text_buffer = ""
+                                else:
+                                    # 兜底：剩余内容全部入队
+                                    for ch in chunks:
+                                        self._tts_chunk_texts.append(ch)
+                                        await tts_queue.put(ch)
+                                    text_buffer = ""
 
                         if is_done and text_buffer.strip():
                             text_buffer, aff, tru = extract_emotion_tags(text_buffer)
@@ -326,7 +332,17 @@ class VoiceChatSession:
             # 并行运行：LLM 生产 + TTS 顺序消费
             llm_task = asyncio.create_task(_llm_producer())
             tts_task = asyncio.create_task(_tts_consumer())
-            await asyncio.gather(llm_task, tts_task, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(llm_task, tts_task, return_exceptions=True),
+                    timeout=30
+                )
+            except asyncio.TimeoutError:
+                self.logger.error("[会话] 管道超时(30s)，强制取消")
+                self._cancel_event.set()
+                for t in (llm_task, tts_task):
+                    t.cancel()
+                await asyncio.gather(llm_task, tts_task, return_exceptions=True)
 
             await _send_json(self.ws, type="llm_done")
 
@@ -360,23 +376,16 @@ class VoiceChatSession:
                 f"音频{audio_duration:.1f}s, RTF {rtf:.2f}"
             )
 
-            # 若 ASR 仍在则回到聆听状态（持续对话），否则回到空闲
-            if self._current_asr:
-                self.state = STATE_LISTENING
-                await _send_json(self.ws, type="status", state=STATE_LISTENING)
-            else:
-                self.state = STATE_IDLE
-                await _send_json(self.ws, type="status", state=STATE_IDLE)
-
         except Exception as e:
             self.logger.error(f"[会话] LLM/TTS 管道异常: {e}")
             await _send_json(self.ws, type="error", message=str(e))
-            if self._current_asr:
-                self.state = STATE_LISTENING
-                await _send_json(self.ws, type="status", state=STATE_LISTENING)
-            else:
-                self.state = STATE_IDLE
-                await _send_json(self.ws, type="status", state=STATE_IDLE)
+        finally:
+            if self.state not in (STATE_IDLE, STATE_LISTENING):
+                if self._current_asr:
+                    self.state = STATE_LISTENING
+                else:
+                    self.state = STATE_IDLE
+                await _send_json(self.ws, type="status", state=self.state)
 
     async def _tts_synthesize(self, text: str):
         """执行单次 TTS 合成并发送音频（在线程池中运行同步 requests）"""

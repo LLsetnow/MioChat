@@ -1,59 +1,28 @@
 /**
- * 设置状态管理 + localStorage 持久化
+ * 设置状态管理（纯内存，不持久化到浏览器）
  * 双分页：语音设置 + 模型与密钥
  */
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive } from 'vue'
 
-const STORAGE_KEY = 'mio-voice-settings'
+// 语音设置（始终使用默认值）
+const voice = ref('longhuhu_v3')
+const instruction = ref('')
+const micEnabled = ref(true)
+const selectedDeviceId = ref('')
 
-function _loadDefaults() {
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved) {
-    try {
-      return JSON.parse(saved)
-    } catch (e) {
-      // ignore
-    }
-  }
-  return null
-}
-
-const defaults = _loadDefaults()
-
-// 语音设置
-const voice = ref(defaults?.voice || 'longxiaochun_v3')
-const instruction = ref(defaults?.instruction || '')
-const micEnabled = ref(defaults?.micEnabled !== undefined ? defaults.micEnabled : true)
-const selectedDeviceId = ref(defaults?.selectedDeviceId || '')
-
-// 模型与密钥
+// 模型与密钥（始终使用默认值）
 const modelConfig = reactive({
-  asr_model: defaults?.asr_model || 'fun-asr-realtime',
-  asr_api_key: defaults?.asr_api_key || '',
-  llm_model: defaults?.llm_model || 'deepseek-v4-flash',
-  llm_api_key: defaults?.llm_api_key || '',
-  llm_base_url: defaults?.llm_base_url || 'https://api.deepseek.com',
-  tts_model: defaults?.tts_model || 'cosyvoice-v3-flash',
-  tts_api_key: defaults?.tts_api_key || '',
+  asr_model: 'fun-asr-realtime',
+  asr_api_key: '',
+  llm_model: 'deepseek-v4-flash',
+  llm_api_key: '',
+  llm_base_url: 'https://api.deepseek.com',
+  tts_model: 'cosyvoice-v3-flash',
+  tts_api_key: '',
 })
 
-function _save() {
-  const data = {
-    voice: voice.value,
-    instruction: instruction.value,
-    micEnabled: micEnabled.value,
-    selectedDeviceId: selectedDeviceId.value,
-    ...modelConfig,
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-}
-
-// 自动保存
-watch([voice, instruction, micEnabled, selectedDeviceId], _save)
-watch(modelConfig, _save, { deep: true })
-
-  // 是否有 localStorage 保存的设置（区分首次用户与回访用户）
-  const hasSavedSettings = !!defaults
+// 始终视为新用户（无持久化设置）
+const hasSavedSettings = ref(false)
 
 export function useSettings() {
   function getUpdateConfigMsg() {
