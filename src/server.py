@@ -3,7 +3,7 @@
 import asyncio
 import json
 import os
-import signal
+
 import sys
 import time
 from pathlib import Path
@@ -639,35 +639,9 @@ def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
     app.router.add_get("/{path:.*}", static_files)
 
     logger.info(f"服务就绪 → ws://{host}:{port}/ws/voice-chat")
+    logger.info("按 Ctrl+C 停止服务")
 
-    # 使用显式 async 启动（兼容 Railway 容器环境）
-    async def _run():
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, host, port)
-        await site.start()
-        logger.info(f"服务已启动: http://{host}:{port}")
-        logger.info("按 Ctrl+C 停止服务")
-
-        # 等待终止信号
-        loop = asyncio.get_event_loop()
-        stop = loop.create_future()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, lambda s=sig: (
-                    logger.info(f"收到信号 {s.name}，正在关闭..."),
-                    stop.set_result(True)
-                ))
-            except (NotImplementedError, ValueError):
-                pass
-        await stop
-
-    try:
-        asyncio.run(_run())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("服务已停止")
-    except Exception as e:
-        logger.error(f"服务启动失败: {e}")
+    web.run_app(app, host=host, port=port, print=None)
 
 
 if __name__ == "__main__":
