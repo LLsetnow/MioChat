@@ -3,8 +3,14 @@
 import asyncio
 import json
 import os
+import sys
 import time
 from pathlib import Path
+
+# 确保项目根目录在 sys.path 中（兼容 python src/server.py 直接运行）
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from aiohttp import web
 
@@ -84,7 +90,7 @@ class VoiceChatSession:
         self.llm_base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
         self.tts_model = os.environ.get("QWEN_TTS_MODEL", "cosyvoice-v3-flash")
         self.tts_api_key = os.environ.get("QWEN_TTS_API_KEY", "")
-        self.tts_voice = os.environ.get("VOICE_ID1", "").split("#")[0].strip() or "longxiaochun_v3"
+        self.tts_voice = os.environ.get("VOICE_ID1", "").split("#")[0].strip() or "longhuhu_v3"
         self.tts_instruction = ""
 
         # 打断控制
@@ -223,7 +229,7 @@ class VoiceChatSession:
         self._pending_trust = 0
 
         try:
-            from src.llm_client import generate_llm_stream, should_trigger_tts, extract_tts_chunks, extract_emotion_tags
+            from src.llm_client import generate_llm_stream, should_trigger_tts, extract_tts_chunks, extract_emotion_tags, analyze_sentiment
 
             text_buffer = ""
             tts_queue = asyncio.Queue()
@@ -293,6 +299,14 @@ class VoiceChatSession:
                             text_buffer = ""
 
                         if is_done:
+                            # 如果 LLM 没有输出显式标签，使用情感分析兜底
+                            if self._pending_affection == 0 and self._pending_trust == 0:
+                                aff, tru = analyze_sentiment(full_text)
+                                if aff != 0 or tru != 0:
+                                    self._pending_affection += aff
+                                    self._pending_trust += tru
+                                    self.logger.info(f"[会话] 情感分析兜底: 好感{aff:+d}, 信任{tru:+d}")
+
                             self.logger.info(f"[LLM] 完整回复: {full_text}")
                             return
                 finally:
