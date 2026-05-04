@@ -111,6 +111,9 @@ class VoiceChatSession:
         self._current_llm_task = None
         self._tts_queue = asyncio.Queue()
 
+        # 日记锁
+        self._diary_lock = asyncio.Lock()
+
         # 性能计时
         self._pipe_start = 0.0       # 管道开始时间
         self._llm_first_token = 0.0  # LLM 首token时间
@@ -527,56 +530,62 @@ class VoiceChatSession:
     # ── 结束对话 → 写日记 ───────────────────────────────────────
 
     async def _handle_end_conversation(self):
-        self.logger.info("[会话] 结束对话请求")
-        if self.state != STATE_IDLE:
-            self.logger.info("[会话] 当前非 IDLE 状态，忽略结束请求")
-            return
+        async with self._diary_lock:
+            self.logger.info("[会话] 结束对话请求")
+            if self.state != STATE_IDLE:
+                self.logger.info("[会话] 当前非 IDLE 状态，忽略结束请求")
+                return
 
-        context = get_context("default")
-        if not context:
-            self.logger.info("[会话] 无对话上下文，直接清理")
+            context = get_context("default")
+            if not context:
+                self.logger.info("[会话] 无对话上下文，直接清理")
+                clear_context("default")
+                await _send_json(self.ws, type="diary_saved", filename="")
+                return
+
+            # 生成日记
+            try:
+                loop = asyncio.get_event_loop()
+                diary_text = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        generate_diary,
+                        context,
+                        self.llm_api_key,
+                        self.llm_base_url,
+                        self.llm_model,
+                    ),
+                    timeout=35,
+                )
+            except Exception as e:
+                self.logger.error(f"[日记] 生成异常: {e}")
+                await _send_json(self.ws, type="error", message=f"日记生成失败: {e}")
+                return
+
+            if not diary_text.strip():
+                self.logger.warning("[日记] 日记内容为空，跳过保存")
+                clear_context("default")
+                await _send_json(self.ws, type="diary_saved", filename="")
+                return
+
+            # 保存到文件
+            DIARY_DIR.mkdir(parents=True, exist_ok=True)
+            now = time.localtime()
+            filename = f"{now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d}-{now.tm_hour:02d}.md"
+            filepath = DIARY_DIR / filename
+            header = f"# {now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:00\n\n"
+            tmp = filepath.with_suffix(".tmp")
+            tmp.write_text(header + diary_text, encoding="utf-8")
+            tmp.rename(filepath)
+            self.logger.info(f"[日记] 已保存: {filepath}")
+
+            # 清理上下文
             clear_context("default")
-            await _send_json(self.ws, type="diary_saved", filename="")
-            return
+            self.affection = 0
+            self.trust = 0
+            await _send_json(self.ws, type="emotion", affection=0, trust=0)
 
-        # 生成日记
-        try:
-            loop = asyncio.get_event_loop()
-            diary_text = await loop.run_in_executor(
-                None,
-                generate_diary,
-                context,
-                self.llm_api_key,
-                self.llm_base_url,
-                self.llm_model,
-            )
-        except Exception as e:
-            self.logger.error(f"[日记] 生成异常: {e}")
-            await _send_json(self.ws, type="error", message=f"日记生成失败: {e}")
-            return
-
-        if not diary_text.strip():
-            self.logger.warning("[日记] 日记内容为空，跳过保存")
-            clear_context("default")
-            await _send_json(self.ws, type="diary_saved", filename="")
-            return
-
-        # 保存到文件
-        DIARY_DIR.mkdir(parents=True, exist_ok=True)
-        now = time.localtime()
-        filename = f"{now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d}-{now.tm_hour:02d}.md"
-        filepath = DIARY_DIR / filename
-        header = f"# {now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:00\n\n"
-        filepath.write_text(header + diary_text, encoding="utf-8")
-        self.logger.info(f"[日记] 已保存: {filepath}")
-
-        # 清理上下文
-        clear_context("default")
-        self.affection = 0
-        self.trust = 0
-        await _send_json(self.ws, type="emotion", affection=0, trust=0)
-
-        await _send_json(self.ws, type="diary_saved", filename=filename)
+            await _send_json(self.ws, type="diary_saved", filename=filename)
 
 
 # ── HTTP 路由 ───────────────────────────────────────────────────────
