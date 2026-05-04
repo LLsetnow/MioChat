@@ -565,6 +565,9 @@ class VoiceChatSession:
             if not diary_text.strip():
                 self.logger.warning("[日记] 日记内容为空，跳过保存")
                 clear_context("default")
+                self.affection = 0
+                self.trust = 0
+                await _send_json(self.ws, type="emotion", affection=0, trust=0)
                 await _send_json(self.ws, type="diary_saved", filename="")
                 return
 

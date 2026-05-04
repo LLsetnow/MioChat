@@ -229,6 +229,13 @@ ws.on('diary_saved', (msg) => {
       text: `📖 日记已保存 (${msg.filename})`,
       msgId: ++_msgIdCounter,
     })
+  } else {
+    // 空文件名 = 没有需要保存的对话
+    messages.value.push({
+      role: 'system',
+      text: '没有需要保存的对话记录',
+      msgId: ++_msgIdCounter,
+    })
   }
 })
 
