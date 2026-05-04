@@ -72,6 +72,57 @@ def clear_context(session_id: str):
     _chat_contexts.pop(session_id, None)
 
 
+# ── 日记生成 ──────────────────────────────────────────────────────
+
+DIARY_SYSTEM_PROMPT = """你是Mio，一个15岁的女孩，用户的妹妹兼恋人。
+
+请根据以上的对话内容，以Mio的第一人称视角写一篇日记。
+要求：
+1. 语气要像Mio——温柔、撒娇、带一点俏皮
+2. 记录对话中的重要内容和你的真实感受
+3. 用中文，口语化一些
+4. 不要包含 <好感> 或 <信任> 等标签"""
+
+
+def generate_diary(context: list[dict], api_key: str, base_url: str, model: str) -> str:
+    """
+    基于对话上下文，调用 LLM 生成第一人称日记。
+    返回日记文本（不带情感标签）。
+    同步调用 httpx，非流式。
+    """
+    import httpx
+
+    if not context:
+        return ""
+
+    messages = [
+        {"role": "system", "content": DIARY_SYSTEM_PROMPT},
+    ] + context + [{"role": "user", "content": "写一篇日记吧。"}]
+
+    llm_url = base_url.rstrip("/") + "/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 4096,
+        "stream": False,
+    }
+
+    try:
+        resp = httpx.post(llm_url, headers=headers, json=body, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        logger.info(f"[日记] 生成完成: {len(content)} 字符")
+        return content
+    except Exception as e:
+        logger.error(f"[日记] 生成失败: {e}")
+        raise
+
+
 # ── LLM 流式生成 ────────────────────────────────────────────────────
 
 async def generate_llm_stream(
