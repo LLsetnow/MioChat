@@ -116,10 +116,17 @@ def generate_diary(context: list[dict], api_key: str, base_url: str, model: str)
         resp.raise_for_status()
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
+        content = re.sub(r'<[^>]*>', '', content).strip()
         logger.info(f"[日记] 生成完成: {len(content)} 字符")
         return content
-    except Exception as e:
-        logger.error(f"[日记] 生成失败: {e}")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"[日记] API 错误: {e.response.status_code} {e.response.text[:200]}")
+        raise
+    except httpx.RequestError as e:
+        logger.error(f"[日记] 网络错误: {e}")
+        raise
+    except (KeyError, IndexError, json.JSONDecodeError) as e:
+        logger.error(f"[日记] 响应解析错误: {e}")
         raise
 
 
