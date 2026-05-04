@@ -16,6 +16,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from aiohttp import web
 
 from src.logger import setup_logger, get_logger
+from src.llm_client import get_context, clear_context, generate_diary
 
 # 加载 .env（本目录）
 from dotenv import load_dotenv
@@ -25,6 +26,7 @@ if _ENV_PATH.exists():
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9902
+DIARY_DIR = Path(__file__).resolve().parent / "diary"
 
 # ── 状态常量 ────────────────────────────────────────────────────────
 
@@ -151,6 +153,8 @@ class VoiceChatSession:
             await self._handle_interrupt()
         elif msg_type == "update_config":
             await self._handle_update_config(msg)
+        elif msg_type == "end_conversation":
+            await self._handle_end_conversation()
 
     # ── 语音输入 ──────────────────────────────────────────────────
 
@@ -520,6 +524,60 @@ class VoiceChatSession:
             self.tts_api_key = msg["tts_api_key"]
         self.logger.info(f"[会话] 配置已更新: voice={self.tts_voice}, tts_model={self.tts_model}")
 
+    # ── 结束对话 → 写日记 ───────────────────────────────────────
+
+    async def _handle_end_conversation(self):
+        self.logger.info("[会话] 结束对话请求")
+        if self.state != STATE_IDLE:
+            self.logger.info("[会话] 当前非 IDLE 状态，忽略结束请求")
+            return
+
+        context = get_context("default")
+        if not context:
+            self.logger.info("[会话] 无对话上下文，直接清理")
+            clear_context("default")
+            await _send_json(self.ws, type="diary_saved", filename="")
+            return
+
+        # 生成日记
+        try:
+            loop = asyncio.get_event_loop()
+            diary_text = await loop.run_in_executor(
+                None,
+                generate_diary,
+                context,
+                self.llm_api_key,
+                self.llm_base_url,
+                self.llm_model,
+            )
+        except Exception as e:
+            self.logger.error(f"[日记] 生成异常: {e}")
+            await _send_json(self.ws, type="error", message=f"日记生成失败: {e}")
+            return
+
+        if not diary_text.strip():
+            self.logger.warning("[日记] 日记内容为空，跳过保存")
+            clear_context("default")
+            await _send_json(self.ws, type="diary_saved", filename="")
+            return
+
+        # 保存到文件
+        DIARY_DIR.mkdir(parents=True, exist_ok=True)
+        now = time.localtime()
+        filename = f"{now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d}-{now.tm_hour:02d}.md"
+        filepath = DIARY_DIR / filename
+        header = f"# {now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:00\n\n"
+        filepath.write_text(header + diary_text, encoding="utf-8")
+        self.logger.info(f"[日记] 已保存: {filepath}")
+
+        # 清理上下文
+        clear_context("default")
+        self.affection = 0
+        self.trust = 0
+        await _send_json(self.ws, type="emotion", affection=0, trust=0)
+
+        await _send_json(self.ws, type="diary_saved", filename=filename)
+
 
 # ── HTTP 路由 ───────────────────────────────────────────────────────
 
@@ -553,6 +611,33 @@ async def api_character(request):
     """GET /api/character — 返回角色信息（姓名、头像路径）"""
     from src.llm_client import get_character_info
     return web.json_response(get_character_info())
+
+
+async def api_diaries(request):
+    """GET /api/diaries — 返回日记文件列表（按时间倒序）"""
+    DIARY_DIR.mkdir(parents=True, exist_ok=True)
+    files = sorted(DIARY_DIR.glob("*.md"), reverse=True)
+    entries = []
+    for f in files:
+        parts = f.stem.split("-")
+        if len(parts) >= 4:
+            time_str = f"{parts[0]}-{parts[1]}-{parts[2]} {parts[3]}:00"
+        else:
+            time_str = f.stem
+        entries.append({"name": f.name, "time": time_str})
+    return web.json_response(entries)
+
+
+async def api_diary_detail(request):
+    """GET /api/diaries/{name} — 返回日记文件内容"""
+    name = request.match_info.get("name", "")
+    if not name.endswith(".md") or "/" in name or "\\" in name:
+        return web.Response(status=400, text="Invalid filename")
+    filepath = DIARY_DIR / name
+    if not filepath.exists():
+        return web.Response(status=404, text="Not found")
+    body = filepath.read_text(encoding="utf-8")
+    return web.Response(body=body, content_type="text/plain; charset=utf-8")
 
 
 async def static_files(request):
@@ -664,6 +749,8 @@ def main(host=DEFAULT_HOST, port=DEFAULT_PORT):
     # API 路由
     app.router.add_get("/api/voices", api_voices)
     app.router.add_get("/api/character", api_character)
+    app.router.add_get("/api/diaries", api_diaries)
+    app.router.add_get("/api/diaries/{name}", api_diary_detail)
 
     # WebSocket 路由
     app.router.add_get("/ws/voice-chat", ws_voice_chat)
