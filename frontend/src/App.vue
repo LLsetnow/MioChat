@@ -13,6 +13,11 @@
           <span class="conn-status" :class="{ connected: wsConnected }">
             {{ wsConnected ? '已连接' : '未连接' }}
           </span>
+          <button class="icon-btn" @click="diaryVisible = true" title="日记">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+              <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" />
+            </svg>
+          </button>
           <button class="icon-btn" @click="settingsVisible = true" title="设置">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
               <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z" />
@@ -56,9 +61,16 @@
           @start-voice="handleStartVoice"
           @stop-voice="handleStopVoice"
           @open-settings="openSettings"
+          @end-conversation="handleEndConversation"
         />
       </div>
     </div>
+
+    <!-- 日记面板 -->
+    <DiaryPanel
+      :visible="diaryVisible"
+      @close="diaryVisible = false"
+    />
 
     <!-- 设置面板 -->
     <SettingsPanel
@@ -87,6 +99,7 @@ import CharacterPanel from './components/CharacterPanel.vue'
 import ChatBubbles from './components/ChatBubbles.vue'
 import ControlBar from './components/ControlBar.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import DiaryPanel from './components/DiaryPanel.vue'
 import { useWebSocket } from './composables/useWebSocket'
 import { useMicrophone } from './composables/useMicrophone'
 import { useAudioPlayer } from './composables/useAudioPlayer'
@@ -108,6 +121,7 @@ const llmPartial = ref('')
 const micVolume = ref(0)
 const settingsVisible = ref(false)
 const voices = ref([])
+const diaryVisible = ref(false)
 
 // 角色信息（从 /api/character 加载）
 const charName = ref('Mio')
@@ -205,6 +219,17 @@ ws.on('emotion', (msg) => {
 ws.on('error', (msg) => {
   console.error('[Error]', msg.message)
   messages.value.push({ role: 'system', text: `错误: ${msg.message}`, msgId: ++_msgIdCounter })
+})
+
+ws.on('diary_saved', (msg) => {
+  if (msg.filename) {
+    console.log(`[日记] 已保存: ${msg.filename}`)
+    messages.value.push({
+      role: 'system',
+      text: `📖 日记已保存 (${msg.filename})`,
+      msgId: ++_msgIdCounter,
+    })
+  }
 })
 
 // ── 连接状态 ──────────────────────────────────────────────
@@ -318,6 +343,15 @@ function handleModelConfigUpdate({ key, value }) {
 
 function syncConfig() {
   ws.send(settings.getUpdateConfigMsg())
+}
+
+function handleEndConversation() {
+  ws.send({ type: 'end_conversation' })
+  messages.value.push({
+    role: 'system',
+    text: '📝 正在结束对话并写日记...',
+    msgId: ++_msgIdCounter,
+  })
 }
 
 // ── 初始化 ──────────────────────────────────────────────
