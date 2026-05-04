@@ -5,19 +5,27 @@
       <img :src="avatarUrl" :alt="charName" class="avatar-img" />
     </div>
 
-    <div class="affection-bar">
-      <div class="bar-label">好感度</div>
-      <div class="bar-track">
-        <div class="bar-fill affection" :class="{ pulse: affPulse }" :style="{ width: affectionPct + '%' }" />
+    <div class="emotions-section">
+      <div
+        v-for="e in emotionList"
+        :key="e.key"
+        class="emotion-bar"
+      >
+        <div class="bar-label">{{ e.label }}</div>
+        <div class="bar-track">
+          <div
+            class="bar-fill"
+            :class="[e.key, { pulse: e.pulse }]"
+            :style="{ width: e.percent + '%' }"
+          />
+        </div>
+        <div class="bar-value">{{ e.value }}</div>
       </div>
-      <div class="bar-value">{{ affection }}</div>
     </div>
-    <div class="affection-bar">
-      <div class="bar-label">信任度</div>
-      <div class="bar-track">
-        <div class="bar-fill trust" :class="{ pulse: truPulse }" :style="{ width: trustPct + '%' }" />
-      </div>
-      <div class="bar-value">{{ trust }}</div>
+
+    <div class="tier-display">
+      <span class="tier-label">{{ tierLabel }}</span>
+      <span class="intimacy-text">亲密度 {{ intimacy.toFixed(1) }}</span>
     </div>
 
     <div class="status-indicator">
@@ -28,15 +36,29 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 
 const props = defineProps({
   state: { type: String, default: 'idle' },
-  affection: { type: Number, default: 0 },
-  trust: { type: Number, default: 0 },
+  emotions: { type: Object, default: () => ({ joy: 0, sadness: 0, anger: 0, fear: 0, love: 0, surprise: 0, trust: 0 }) },
+  personaTier: { type: Number, default: 1 },
+  intimacy: { type: Number, default: 0 },
   charName: { type: String, default: 'Mio' },
   avatarUrl: { type: String, default: '/img/gpt_img_20260430_210021.png' },
 })
+
+const TIER_LABELS = { 1: '陌生', 2: '友好', 3: '亲密' }
+const tierLabel = computed(() => TIER_LABELS[props.personaTier] || `Lv.${props.personaTier}`)
+
+const EMOTION_META = [
+  { key: 'joy', label: '快乐', color: '#ffd93d' },
+  { key: 'sadness', label: '悲伤', color: '#6c5ce7' },
+  { key: 'anger', label: '愤怒', color: '#ff6b6b' },
+  { key: 'fear', label: '恐惧', color: '#a29bfe' },
+  { key: 'love', label: '爱意', color: '#ff7eb3' },
+  { key: 'surprise', label: '惊喜', color: '#fdcb6e' },
+  { key: 'trust', label: '信任', color: '#74b9ff' },
+]
 
 const stateClass = computed(() => props.state)
 
@@ -45,24 +67,26 @@ const stateText = computed(() => {
   return map[props.state] || '待机中'
 })
 
-const affectionPct = computed(() => Math.min(100, Math.max(0, props.affection * 2)))
-const trustPct = computed(() => Math.min(100, Math.max(0, props.trust * 2)))
+const pulses = reactive({})
+EMOTION_META.forEach(e => { pulses[e.key] = false })
 
-const affPulse = ref(false)
-const truPulse = ref(false)
+const emotionList = computed(() =>
+  EMOTION_META.map(e => {
+    const raw = props.emotions[e.key] ?? 0
+    // 映射 [-50, 50] 范围到 [0, 100]%，当前显示绝对值，偏移 +50
+    const percent = Math.min(100, Math.max(0, (raw + 50) * 1))
+    const value = raw > 0 ? `+${raw}` : `${raw}`
+    return { ...e, percent, value, pulse: pulses[e.key] }
+  })
+)
 
-watch(() => props.affection, (val, old) => {
-  if (val !== old && old !== undefined) {
-    affPulse.value = true
-    setTimeout(() => { affPulse.value = false }, 800)
-  }
-})
-
-watch(() => props.trust, (val, old) => {
-  if (val !== old && old !== undefined) {
-    truPulse.value = true
-    setTimeout(() => { truPulse.value = false }, 800)
-  }
+EMOTION_META.forEach(e => {
+  watch(() => props.emotions[e.key], (val, old) => {
+    if (val !== old && old !== undefined) {
+      pulses[e.key] = true
+      setTimeout(() => { pulses[e.key] = false }, 800)
+    }
+  })
 })
 </script>
 
@@ -120,24 +144,54 @@ watch(() => props.trust, (val, old) => {
   object-fit: cover;
 }
 
-.affection-bar {
+.tier-display {
   width: 100%;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  padding: 2px 0;
+}
+
+.tier-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffd93d;
+  text-shadow: 0 0 8px rgba(255, 217, 61, 0.3);
+}
+
+.intimacy-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.emotions-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.emotion-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .bar-label {
-  font-size: 12px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.7);
   white-space: nowrap;
-  width: 48px;
+  width: 36px;
+  text-align: right;
 }
 
 .bar-track {
   flex: 1;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.1);
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -148,13 +202,13 @@ watch(() => props.trust, (val, old) => {
   transition: width 0.5s ease;
 }
 
-.bar-fill.affection {
-  background: linear-gradient(90deg, #ff7eb3, #ff5f9e);
-}
-
-.bar-fill.trust {
-  background: linear-gradient(90deg, #7eb3ff, #5f9eff);
-}
+.bar-fill.joy { background: #ffd93d; }
+.bar-fill.sadness { background: #6c5ce7; }
+.bar-fill.anger { background: #ff6b6b; }
+.bar-fill.fear { background: #a29bfe; }
+.bar-fill.love { background: #ff7eb3; }
+.bar-fill.surprise { background: #fdcb6e; }
+.bar-fill.trust { background: #74b9ff; }
 
 .bar-fill.pulse {
   animation: barPulse 0.8s ease;
@@ -166,10 +220,11 @@ watch(() => props.trust, (val, old) => {
 }
 
 .bar-value {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
-  width: 28px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  width: 32px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .status-indicator {

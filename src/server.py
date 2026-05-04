@@ -6,6 +6,7 @@ import os
 
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 # 确保项目根目录在 sys.path 中（兼容 python src/server.py 直接运行）
@@ -16,7 +17,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 from aiohttp import web
 
 from src.logger import setup_logger, get_logger
-from src.llm_client import get_context, clear_context, generate_diary
+from src.llm_client import get_context, clear_context, generate_diary, get_persona_tier
+import httpx
 
 # 加载 .env（本目录）
 from dotenv import load_dotenv
@@ -104,6 +106,7 @@ class VoiceChatSession:
         self.tts_api_key = os.environ.get("QWEN_TTS_API_KEY", "")
         self.tts_voice = os.environ.get("VOICE_ID1", "").split("#")[0].strip() or "longhuhu_v3"
         self.tts_instruction = ""
+        self.tts_enabled = True
 
         # 打断控制
         self._cancel_event = asyncio.Event()
@@ -121,14 +124,15 @@ class VoiceChatSession:
         self._tts_pcm_samples = 0    # TTS 累计 PCM 采样数
         self._tts_sample_rate = 24000
         self._tts_chunk_texts = []
-        self._pending_affection = 0
-        self._pending_trust = 0   # TTS 分块文本（用于日志）
 
-        # 好感度
-        self.affection = 0
-        self.trust = 0
-        self._pending_affection = 0
-        self._pending_trust = 0
+        # 多维情感状态
+        self.emotions = {"joy": 0.0, "sadness": 0.0, "anger": 0.0, "fear": 0.0, "love": 0.0, "surprise": 0.0, "trust": 0.0}
+        self._pending_emotions = {"joy": 0.0, "sadness": 0.0, "anger": 0.0, "fear": 0.0, "love": 0.0, "surprise": 0.0, "trust": 0.0}
+
+        # 亲密度 & 人设等级
+        self.intimacy = 0.0
+        self.persona_tier = 1
+        self._pending_intimacy = 0.0
 
     async def handle_message(self, raw):
         """消息路由"""
@@ -242,8 +246,8 @@ class VoiceChatSession:
         self._tts_pcm_samples = 0
         self._tts_sample_rate = 24000
         self._tts_chunk_texts = []
-        self._pending_affection = 0
-        self._pending_trust = 0
+        self._pending_emotions = {"joy": 0.0, "sadness": 0.0, "anger": 0.0, "fear": 0.0, "love": 0.0, "surprise": 0.0, "trust": 0.0}
+        self._pending_intimacy = 0.0
 
         try:
             from src.llm_client import generate_llm_stream, should_trigger_tts, extract_tts_chunks, extract_emotion_tags, analyze_sentiment
@@ -261,6 +265,7 @@ class VoiceChatSession:
                         api_key=self.llm_api_key,
                         base_url=self.llm_base_url,
                         model=self.llm_model,
+                        tier=self.persona_tier,
                     ):
                         if self._cancel_event.is_set():
                             return
@@ -272,12 +277,16 @@ class VoiceChatSession:
 
                             # 检查是否有自然断点 → 分块
                             if should_trigger_tts(text_buffer) and not _has_unclosed_paren(text_buffer):
-                                # 先提取好感/信任变化标签（从 text_buffer 中去掉）
-                                text_buffer, aff, tru = extract_emotion_tags(text_buffer)
-                                if aff != 0 or tru != 0:
-                                    self.logger.info(f"[会话] 提取标签: 好感{aff:+d}, 信任{tru:+d}")
-                                self._pending_affection += aff
-                                self._pending_trust += tru
+                                # 先提取情绪标签（从 text_buffer 中去掉）
+                                text_buffer, emotions = extract_emotion_tags(text_buffer)
+                                for k, v in emotions.items():
+                                    if v != 0:
+                                        self._pending_emotions[k] += v
+                                self._pending_intimacy += emotions.get("love", 0) + emotions.get("trust", 0)
+                                has_nonzero = any(v != 0 for v in emotions.values())
+                                if has_nonzero:
+                                    active = {k: v for k, v in emotions.items() if v != 0}
+                                    self.logger.info(f"[会话] 提取标签: {active}")
                                 # 发送过滤掉标签后的纯文本到前端
                                 if text_buffer:
                                     await _send_json(self.ws, type="llm_delta", text=text_buffer)
@@ -307,11 +316,15 @@ class VoiceChatSession:
                                     text_buffer = ""
 
                         if is_done and text_buffer.strip():
-                            text_buffer, aff, tru = extract_emotion_tags(text_buffer)
-                            if aff != 0 or tru != 0:
-                                self.logger.info(f"[会话] 提取标签(is_done): 好感{aff:+d}, 信任{tru:+d}")
-                            self._pending_affection += aff
-                            self._pending_trust += tru
+                            text_buffer, emotions = extract_emotion_tags(text_buffer)
+                            for k, v in emotions.items():
+                                if v != 0:
+                                    self._pending_emotions[k] += v
+                            self._pending_intimacy += emotions.get("love", 0) + emotions.get("trust", 0)
+                            has_nonzero = any(v != 0 for v in emotions.values())
+                            if has_nonzero:
+                                active = {k: v for k, v in emotions.items() if v != 0}
+                                self.logger.info(f"[会话] 提取标签(is_done): {active}")
                             # 发送剩余纯文本（标签已被去掉）
                             if text_buffer.strip():
                                 await _send_json(self.ws, type="llm_delta", text=text_buffer)
@@ -323,12 +336,16 @@ class VoiceChatSession:
 
                         if is_done:
                             # 如果 LLM 没有输出显式标签，使用情感分析兜底
-                            if self._pending_affection == 0 and self._pending_trust == 0:
-                                aff, tru = analyze_sentiment(full_text)
-                                if aff != 0 or tru != 0:
-                                    self._pending_affection += aff
-                                    self._pending_trust += tru
-                                    self.logger.info(f"[会话] 情感分析兜底: 好感{aff:+d}, 信任{tru:+d}")
+                            all_zero = all(v == 0 for v in self._pending_emotions.values())
+                            if all_zero:
+                                emotions = analyze_sentiment(full_text)
+                                has_nonzero = any(v != 0 for v in emotions.values())
+                                if has_nonzero:
+                                    for k, v in emotions.items():
+                                        self._pending_emotions[k] += v
+                                    self._pending_intimacy += emotions.get("love", 0) + emotions.get("trust", 0)
+                                    active = {k: v for k, v in emotions.items() if v != 0}
+                                    self.logger.info(f"[会话] 情感分析兜底: {active}")
 
                             self.logger.info(f"[LLM] 完整回复: {full_text}")
                             return
@@ -343,7 +360,8 @@ class VoiceChatSession:
                     tts_text = await tts_queue.get()
                     if tts_text is None:
                         break
-                    await self._tts_synthesize(tts_text)
+                    if self.tts_enabled:
+                        await self._tts_synthesize(tts_text)
 
             # 并行运行：LLM 生产 + TTS 顺序消费
             llm_task = asyncio.create_task(_llm_producer())
@@ -362,16 +380,22 @@ class VoiceChatSession:
 
             await _send_json(self.ws, type="llm_done")
 
-            # 应用好感/信任变化
-            self.affection += self._pending_affection
-            self.trust += self._pending_trust
-            if self._pending_affection != 0 or self._pending_trust != 0:
-                self.logger.info(
-                    f"[会话] 好感变化:{self._pending_affection:+d}, 信任变化:{self._pending_trust:+d} | "
-                    f"好感度:{self.affection}, 信任度:{self.trust}"
-                )
-                await _send_json(self.ws, type="emotion",
-                                 affection=self.affection, trust=self.trust)
+            # 应用多维情感变化
+            for k in self._pending_emotions:
+                self.emotions[k] += self._pending_emotions[k]
+            has_nonzero = any(v != 0 for v in self._pending_emotions.values())
+            if has_nonzero:
+                active = {k: f"{self._pending_emotions[k]:+.1f}" for k, v in self._pending_emotions.items() if v != 0}
+                self.logger.info(f"[会话] 情感变化: {active} | 当前: {self.emotions}")
+                await _send_json(self.ws, type="emotion", **self.emotions)
+
+            # 亲密度 & 人设切换
+            self.intimacy += self._pending_intimacy
+            new_tier = get_persona_tier(self.intimacy)
+            if new_tier != self.persona_tier:
+                self.persona_tier = new_tier
+                self.logger.info(f"[角色] 人设切换至 Tier {new_tier} (亲密度: {self.intimacy:.1f})")
+                await _send_json(self.ws, type="persona_tier", tier=new_tier, intimacy=round(self.intimacy, 1))
 
             # ── TTS 分块日志 ──
             total_chunks = len(self._tts_chunk_texts)
@@ -525,7 +549,27 @@ class VoiceChatSession:
             self.tts_model = msg["tts_model"]
         if "tts_api_key" in msg and msg["tts_api_key"]:
             self.tts_api_key = msg["tts_api_key"]
-        self.logger.info(f"[会话] 配置已更新: voice={self.tts_voice}, tts_model={self.tts_model}")
+        if "tts_enabled" in msg:
+            self.tts_enabled = msg["tts_enabled"]
+        self.logger.info(f"[会话] 配置已更新: voice={self.tts_voice}, tts_model={self.tts_model}, tts_enabled={self.tts_enabled}")
+
+    # ── 时间 API ───────────────────────────────────────────────
+
+    async def _fetch_real_time(self) -> datetime | None:
+        """调用外部 API 获取真实时间，失败则返回 None"""
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get("https://worldtimeapi.org/api/timezone/Asia/Shanghai")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    dt_str = data.get("datetime", "")
+                    if dt_str:
+                        dt = datetime.fromisoformat(dt_str)
+                        self.logger.info(f"[日记] 时间API返回: {dt}")
+                        return dt
+        except Exception as e:
+            self.logger.warning(f"[日记] 时间API失败，使用本地时间: {e}")
+        return None
 
     # ── 结束对话 → 写日记 ───────────────────────────────────────
 
@@ -543,6 +587,10 @@ class VoiceChatSession:
                 await _send_json(self.ws, type="diary_saved", filename="")
                 return
 
+            # 获取真实时间
+            real_dt = await self._fetch_real_time()
+            now = real_dt if real_dt else datetime.now()
+
             # 生成日记
             try:
                 loop = asyncio.get_event_loop()
@@ -554,6 +602,9 @@ class VoiceChatSession:
                         self.llm_api_key,
                         self.llm_base_url,
                         self.llm_model,
+                        now.month,
+                        now.day,
+                        self.persona_tier,
                     ),
                     timeout=35,
                 )
@@ -565,28 +616,27 @@ class VoiceChatSession:
             if not diary_text.strip():
                 self.logger.warning("[日记] 日记内容为空，跳过保存")
                 clear_context("default")
-                self.affection = 0
-                self.trust = 0
-                await _send_json(self.ws, type="emotion", affection=0, trust=0)
+                self.emotions = {"joy": 0.0, "sadness": 0.0, "anger": 0.0, "fear": 0.0, "love": 0.0, "surprise": 0.0, "trust": 0.0}
+                self.intimacy = 0.0
+                self.persona_tier = 1
+                await _send_json(self.ws, type="emotion", **self.emotions)
                 await _send_json(self.ws, type="diary_saved", filename="")
                 return
 
-            # 保存到文件
-            DIARY_DIR.mkdir(parents=True, exist_ok=True)
-            now = time.localtime()
-            filename = f"{now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d}-{now.tm_hour:02d}.md"
+            # 文件名精确到秒，避免覆盖
+            filename = now.strftime("%Y-%m-%d-%H-%M-%S.md")
             filepath = DIARY_DIR / filename
-            header = f"# {now.tm_year:04d}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:00\n\n"
             tmp = filepath.with_suffix(".tmp")
-            tmp.write_text(header + diary_text, encoding="utf-8")
+            tmp.write_text(diary_text, encoding="utf-8")
             tmp.rename(filepath)
             self.logger.info(f"[日记] 已保存: {filepath}")
 
             # 清理上下文
             clear_context("default")
-            self.affection = 0
-            self.trust = 0
-            await _send_json(self.ws, type="emotion", affection=0, trust=0)
+            self.emotions = {"joy": 0.0, "sadness": 0.0, "anger": 0.0, "fear": 0.0, "love": 0.0, "surprise": 0.0, "trust": 0.0}
+            self.intimacy = 0.0
+            self.persona_tier = 1
+            await _send_json(self.ws, type="emotion", **self.emotions)
 
             await _send_json(self.ws, type="diary_saved", filename=filename)
 
@@ -632,7 +682,9 @@ async def api_diaries(request):
     entries = []
     for f in files:
         parts = f.stem.split("-")
-        if len(parts) >= 4:
+        if len(parts) >= 5:
+            time_str = f"{parts[0]}-{parts[1]}-{parts[2]} {parts[3]}:{parts[4]}"
+        elif len(parts) == 4:
             time_str = f"{parts[0]}-{parts[1]}-{parts[2]} {parts[3]}:00"
         else:
             time_str = f.stem
@@ -649,7 +701,7 @@ async def api_diary_detail(request):
     if not filepath.exists():
         return web.Response(status=404, text="Not found")
     body = filepath.read_text(encoding="utf-8")
-    return web.Response(body=body, content_type="text/plain; charset=utf-8")
+    return web.Response(body=body, content_type="text/plain", charset="utf-8")
 
 
 async def static_files(request):

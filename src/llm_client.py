@@ -11,43 +11,91 @@ logger = get_logger()
 
 _CHAR_FILE = Path(__file__).resolve().parent / "doc" / "character.json"
 
-_CHARACTER_PROMPT: str | None = None
+_CHARACTER_ID = "001"
 
 
-def get_character_prompt() -> str:
-    global _CHARACTER_PROMPT
-    if _CHARACTER_PROMPT is not None:
-        return _CHARACTER_PROMPT
-
+def _load_char() -> dict:
+    """加载角色 JSON 并返回当前角色数据，失败返回空 dict"""
     try:
         if _CHAR_FILE.exists():
             data = json.loads(_CHAR_FILE.read_text(encoding="utf-8"))
-            prompt = data.get("system_prompt", "")
-            if prompt.strip():
-                _CHARACTER_PROMPT = prompt
-                logger.info(f"[角色] 已加载角色配置: {data.get('name', 'unknown')}")
-                return _CHARACTER_PROMPT
+            return data.get(_CHARACTER_ID, {})
     except Exception as e:
         logger.warning(f"[角色] 读取角色配置文件失败: {e}")
+    return {}
 
-    # 兜底：极简角色描述
-    _CHARACTER_PROMPT = "你是一个友好的 AI 助手。请用中文回答用户的问题。"
+
+def get_character_prompt() -> str:
+    """兼容旧接口：返回默认角色提示词（优先 tier 3，其次 personality 顶层字段）"""
+    char = _load_char()
+    tiers = char.get("personality_tiers", [])
+    if tiers:
+        prompt = tiers[-1].get("personality", "")
+        if prompt.strip():
+            return prompt
+    prompt = char.get("personality", "")
+    if prompt.strip():
+        return prompt
     logger.warning("[角色] 使用兜底提示词（未找到有效角色配置）")
-    return _CHARACTER_PROMPT
+    return "你是一个友好的 AI 助手。请用中文回答用户的问题。"
+
+
+def get_persona_tier(intimacy: float) -> int:
+    """根据亲密度返回对应的人设等级"""
+    char = _load_char()
+    tiers = char.get("personality_tiers", [])
+    if not tiers:
+        return 1
+    best = 1
+    for t in tiers:
+        if intimacy >= t.get("min_intimacy", 0) and t.get("level", 1) > best:
+            best = t["level"]
+    return best
+
+
+def get_tiered_prompt(tier: int) -> str:
+    """返回指定等级的角色提示词"""
+    char = _load_char()
+    tiers = char.get("personality_tiers", [])
+    for t in tiers:
+        if t.get("level") == tier:
+            prompt = t.get("personality", "")
+            if prompt.strip():
+                return prompt
+    return get_character_prompt()
+
+
+def get_tiered_diary_prompt(tier: int) -> str:
+    """返回指定等级的日记提示词"""
+    char = _load_char()
+    tiers = char.get("personality_tiers", [])
+    for t in tiers:
+        if t.get("level") == tier:
+            prompt = t.get("diary_prompt", "")
+            if prompt.strip():
+                return prompt
+    return get_diary_prompt()
 
 
 def get_character_info() -> dict:
     """返回角色基本信息（name, avatar），用于 API 输出"""
-    try:
-        if _CHAR_FILE.exists():
-            data = json.loads(_CHAR_FILE.read_text(encoding="utf-8"))
-            return {
-                "name": data.get("name", "Mio"),
-                "avatar": data.get("avatar", ""),
-            }
-    except Exception:
-        pass
+    char = _load_char()
+    if char:
+        return {
+            "name": char.get("name", "Mio"),
+            "avatar": char.get("avatar", ""),
+        }
     return {"name": "Mio", "avatar": ""}
+
+
+def get_diary_prompt() -> str:
+    """从角色配置读取日记提示词"""
+    char = _load_char()
+    prompt = char.get("diary_prompt", "")
+    if prompt.strip():
+        return prompt
+    # 兜底
+    return "你是Mio，一个15岁的女孩，用户的妹妹兼恋人。\n\n请根据以上的对话内容，以Mio的第一人称视角写一篇日记。\n要求：\n1. 语气要像Mio——温柔、撒娇、带一点俏皮\n2. 记录对话中的重要内容和你的真实感受\n3. 用中文，口语化一些\n4. 不要包含 <emotion> 等标签"
 
 # ── 会话上下文管理 ──────────────────────────────────────────────────
 
@@ -74,17 +122,8 @@ def clear_context(session_id: str):
 
 # ── 日记生成 ──────────────────────────────────────────────────────
 
-DIARY_SYSTEM_PROMPT = """你是Mio，一个15岁的女孩，用户的妹妹兼恋人。
 
-请根据以上的对话内容，以Mio的第一人称视角写一篇日记。
-要求：
-1. 语气要像Mio——温柔、撒娇、带一点俏皮
-2. 记录对话中的重要内容和你的真实感受
-3. 用中文，口语化一些
-4. 不要包含 <好感> 或 <信任> 等标签"""
-
-
-def generate_diary(context: list[dict], api_key: str, base_url: str, model: str) -> str:
+def generate_diary(context: list[dict], api_key: str, base_url: str, model: str, month: int = 0, day: int = 0, tier: int = 1) -> str:
     """
     基于对话上下文，调用 LLM 生成第一人称日记。
     返回日记文本（不带情感标签）。
@@ -95,8 +134,13 @@ def generate_diary(context: list[dict], api_key: str, base_url: str, model: str)
     if not context:
         return ""
 
+    diary_sys_prompt = get_tiered_diary_prompt(tier)
+    date_hint = ""
+    if month and day:
+        date_hint = f"\n5. 第一行格式为「{month}月{day}日 天气」，天气从【晴、多云、阴、雨】中选择"
+
     messages = [
-        {"role": "system", "content": DIARY_SYSTEM_PROMPT},
+        {"role": "system", "content": diary_sys_prompt + date_hint},
     ] + context + [{"role": "user", "content": "写一篇日记吧。"}]
 
     llm_url = base_url.rstrip("/") + "/chat/completions"
@@ -138,6 +182,7 @@ async def generate_llm_stream(
     api_key: str,
     base_url: str,
     model: str,
+    tier: int = 1,
 ):
     """
     LLM SSE 流式生成器。
@@ -147,7 +192,7 @@ async def generate_llm_stream(
 
     history = get_context(session_id)
     messages = [
-        {"role": "system", "content": get_character_prompt()},
+        {"role": "system", "content": get_tiered_prompt(tier)},
     ] + history + [{"role": "user", "content": user_text}]
 
     llm_url = base_url.rstrip("/") + "/chat/completions"
@@ -226,22 +271,33 @@ def should_trigger_tts(text_buffer: str) -> bool:
     return False
 
 
-def extract_emotion_tags(text: str) -> tuple[str, int, int]:
-    """从文本中提取好感/信任变化标签，支持多种格式：
-    <好感:+3> <好感变化:+3> <好感：+3> <好感变化：+3>
+EMOTION_KEYS = ["joy", "sadness", "anger", "fear", "love", "surprise", "trust"]
+
+
+def extract_emotion_tags(text: str) -> tuple[str, dict[str, float]]:
+    """从文本中提取多维情绪标签，格式：
+    <emotion: joy:+0.3, sadness:0, anger:-0.1, fear:0, love:+0.5, surprise:0, trust:+0.2>
+    返回 (clean_text, {key: delta, ...})
     """
-    affection = 0
-    trust = 0
+    emotions = {k: 0.0 for k in EMOTION_KEYS}
     clean = text
-    m = re.search(r'<好感(?:变化)?[：:]\s*([+-]?\d+)>', clean)
+    m = re.search(r'<emotion:\s*(.*?)>', clean, re.DOTALL)
     if m:
-        affection = int(m.group(1))
+        raw = m.group(1)
         clean = clean.replace(m.group(0), "")
-    m = re.search(r'<信任(?:变化)?[：:]\s*([+-]?\d+)>', clean)
-    if m:
-        trust = int(m.group(1))
-        clean = clean.replace(m.group(0), "")
-    return clean, affection, trust
+        parts = [p.strip() for p in raw.split(",")]
+        for part in parts:
+            for key in EMOTION_KEYS:
+                if part.startswith(key + ":") or part.startswith(key + "："):
+                    try:
+                        val_str = part.split(":", 1)[1].strip()
+                        val_str = val_str.replace("：", "").strip()
+                        val = float(val_str)
+                        emotions[key] = val
+                    except ValueError:
+                        pass
+                    break
+    return clean, emotions
 
 
 def strip_action_tags(text: str) -> str:
@@ -292,82 +348,77 @@ def extract_tts_chunks(text: str, max_chunk_len: int = 15) -> list[str]:
 # ── 情感分析兜底 ──────────────────────────────────────────────────────
 
 _SENTIMENT_WORDS = {
-    # (word, affection_change, trust_change, weight)
-    "开心": (3, 0),
-    "高兴": (2, 0),
-    "好开心": (3, 1),
-    "超级": (2, 0),
-    "最喜欢": (3, 2),
-    "真的吗": (2, 1),
-    "真的假的": (2, 1),
-    "喜欢": (2, 1),
-    "感动": (3, 3),
-    "幸福": (3, 2),
-    "暖暖": (2, 1),
-    "温暖": (1, 2),
-    "甜": (2, 1),
-    "亲": (2, 1),
-    "抱": (2, 1),
-    "爱": (3, 2),
-    "想": (1, 0),
-    "撒娇": (2, 1),
-    "相信": (0, 2),
-    "依靠": (1, 2),
-    "依赖": (1, 2),
-    "可靠": (0, 2),
-    "安心": (1, 2),
-    "讨厌": (-3, -1),
-    "哼": (-2, -1),
-    "坏": (-1, 0),
-    "不理": (-2, -2),
-    "伤心": (-3, -1),
-    "难过": (-3, -2),
-    "生气": (-2, -1),
-    "不信": (-1, -2),
-    "怀疑": (0, -2),
-    "骗": (-1, -3),
-    "小气": (-1, -1),
+    # word -> {joy, sadness, anger, fear, love, surprise, trust}
+    "开心": {"joy": 0.4, "love": 0.2, "trust": 0.1},
+    "高兴": {"joy": 0.3},
+    "好开心": {"joy": 0.5, "love": 0.3, "trust": 0.2},
+    "最喜欢": {"joy": 0.4, "love": 0.6, "trust": 0.3},
+    "真的吗": {"surprise": 0.4, "joy": 0.2},
+    "真的假的": {"surprise": 0.5, "joy": 0.2},
+    "喜欢": {"love": 0.4, "joy": 0.2, "trust": 0.1},
+    "感动": {"joy": 0.5, "love": 0.4, "trust": 0.4, "surprise": 0.3},
+    "幸福": {"joy": 0.6, "love": 0.4, "trust": 0.3},
+    "暖暖": {"joy": 0.3, "love": 0.3, "trust": 0.2},
+    "温暖": {"joy": 0.2, "trust": 0.3, "love": 0.2},
+    "甜": {"love": 0.4, "joy": 0.3},
+    "亲": {"love": 0.5, "trust": 0.2},
+    "抱": {"love": 0.4, "trust": 0.2, "joy": 0.2},
+    "爱": {"love": 0.7, "joy": 0.4, "trust": 0.3},
+    "想": {"love": 0.3, "joy": 0.1},
+    "撒娇": {"love": 0.3, "joy": 0.2},
+    "相信": {"trust": 0.5, "love": 0.2},
+    "依靠": {"trust": 0.4, "love": 0.3},
+    "依赖": {"trust": 0.3, "love": 0.3},
+    "可靠": {"trust": 0.4},
+    "安心": {"trust": 0.4, "joy": 0.2},
+    "讨厌": {"anger": 0.4, "joy": -0.3, "love": -0.3, "trust": -0.2},
+    "哼": {"anger": 0.2, "joy": -0.2},
+    "坏": {"love": -0.2, "joy": -0.1},
+    "不理": {"trust": -0.4, "love": -0.3, "anger": 0.2, "sadness": 0.2},
+    "伤心": {"sadness": 0.5, "joy": -0.4, "trust": -0.2},
+    "难过": {"sadness": 0.5, "joy": -0.4, "trust": -0.3, "fear": 0.1},
+    "生气": {"anger": 0.5, "joy": -0.3, "sadness": 0.1},
+    "不信": {"trust": -0.4, "anger": 0.1, "surprise": 0.2},
+    "怀疑": {"trust": -0.3, "fear": 0.2},
+    "骗": {"trust": -0.5, "anger": 0.2, "fear": 0.2},
+    "小气": {"trust": -0.2, "joy": -0.1, "anger": 0.1},
 }
 
 _NEGATION_WORDS = {"不", "没", "别"}
 
 
-def analyze_sentiment(text: str) -> tuple[int, int]:
-    """根据回复内容关键词估算情感变化，作为 LLM 未输出显式标签时的兜底。
-    返回 (affection_change, trust_change)，取值范围 -3 ~ +3。
+def analyze_sentiment(text: str) -> dict[str, float]:
+    """根据回复内容关键词估算多维情感变化，作为 LLM 未输出显式标签时的兜底。
+    返回 {key: delta}，各维度取值范围 -1.0 ~ +1.0。
     """
     # 去除动作标签和尖括号标签，只分析说话内容
     clean = re.sub(r'[（\(][^）\)]*[）\)]', '', text)
     clean = re.sub(r'<[^>]*>', '', clean)
 
-    total_aff = 0
-    total_tru = 0
+    result = {k: 0.0 for k in EMOTION_KEYS}
     matched = False
 
-    for word, (aff, tru) in _SENTIMENT_WORDS.items():
+    for word, deltas in _SENTIMENT_WORDS.items():
         idx = clean.find(word)
         while idx != -1:
             matched = True
-            # 检查前面是否有否定词（往前看 2 个字符）
             start = max(0, idx - 2)
             prefix = clean[start:idx]
             has_negation = any(neg in prefix for neg in _NEGATION_WORDS)
 
-            if has_negation:
-                total_aff -= aff
-                total_tru -= tru
-            else:
-                total_aff += aff
-                total_tru += tru
+            for k, v in deltas.items():
+                if has_negation:
+                    result[k] -= v
+                else:
+                    result[k] += v
 
             idx = clean.find(word, idx + 1)
 
-    # 没有匹配到任何关键词时返回中性
     if not matched:
-        return (0, 0)
+        return result
 
-    # clamp 到 [-3, 3]
-    total_aff = max(-3, min(3, total_aff))
-    total_tru = max(-3, min(3, total_tru))
+    # clamp 到 [-1.0, 1.0]
+    for k in result:
+        result[k] = max(-1.0, min(1.0, result[k]))
 
-    return (total_aff, total_tru)
+    return result

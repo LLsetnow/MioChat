@@ -9,6 +9,7 @@ const voice = ref('longhuhu_v3')
 const instruction = ref('')
 const micEnabled = ref(true)
 const selectedDeviceId = ref('')
+const ttsEnabled = ref(true)
 
 // 模型与密钥（始终使用默认值）
 const modelConfig = reactive({
@@ -36,6 +37,7 @@ export function useSettings() {
     msg.llm_base_url = modelConfig.llm_base_url
     msg.tts_model = modelConfig.tts_model
     if (modelConfig.tts_api_key) msg.tts_api_key = modelConfig.tts_api_key
+    msg.tts_enabled = ttsEnabled.value
     return msg
   }
 
@@ -45,6 +47,7 @@ export function useSettings() {
     instruction,
     micEnabled,
     selectedDeviceId,
+    ttsEnabled,
     modelConfig,
     getUpdateConfigMsg,
   }

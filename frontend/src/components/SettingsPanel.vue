@@ -65,6 +65,18 @@
                   <span class="toggle-slider" />
                 </label>
               </div>
+
+              <div class="form-group toggle-group">
+                <label>TTS 语音合成</label>
+                <label class="toggle">
+                  <input
+                    type="checkbox"
+                    :checked="ttsEnabled"
+                    @change="$emit('update:tts-enabled', $event.target.checked)"
+                  />
+                  <span class="toggle-slider" />
+                </label>
+              </div>
             </div>
 
             <!-- 模型与密钥 -->
@@ -149,6 +161,7 @@ const props = defineProps({
   currentInstruction: { type: String, default: '' },
   currentDeviceId: { type: String, default: '' },
   micEnabled: { type: Boolean, default: true },
+  ttsEnabled: { type: Boolean, default: true },
   audioDevices: { type: Array, default: () => [] },
   modelConfig: { type: Object, default: () => ({}) },
 })
@@ -159,6 +172,7 @@ const emit = defineEmits([
   'update:instruction',
   'update:device',
   'update:mic-enabled',
+  'update:tts-enabled',
   'update:model-config',
 ])
 

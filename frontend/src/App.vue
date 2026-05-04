@@ -32,8 +32,9 @@
         <div class="left-panel">
           <CharacterPanel
             :state="currentState"
-            :affection="affection"
-            :trust="trust"
+            :emotions="emotions"
+            :personaTier="personaTier"
+            :intimacy="intimacy"
             :charName="charName"
             :avatarUrl="avatarUrl"
           />
@@ -80,6 +81,7 @@
       :currentInstruction="settings.instruction.value"
       :currentDeviceId="mic.selectedDeviceId.value"
       :micEnabled="settings.micEnabled.value"
+      :ttsEnabled="settings.ttsEnabled.value"
       :audioDevices="mic.audioDevices.value"
       :modelConfig="settings.modelConfig"
       @close="settingsVisible = false"
@@ -87,13 +89,14 @@
       @update:instruction="handleInstructionUpdate"
       @update:device="handleDeviceUpdate"
       @update:mic-enabled="handleMicEnabledUpdate"
+      @update:tts-enabled="handleTtsEnabledUpdate"
       @update:model-config="handleModelConfigUpdate"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import ParticleBg from './components/ParticleBg.vue'
 import CharacterPanel from './components/CharacterPanel.vue'
 import ChatBubbles from './components/ChatBubbles.vue'
@@ -113,8 +116,9 @@ const settings = useSettings()
 
 const wsConnected = ref(false)
 const currentState = ref('idle')
-const affection = ref(0)
-const trust = ref(0)
+const emotions = reactive({ joy: 0, sadness: 0, anger: 0, fear: 0, love: 0, surprise: 0, trust: 0 })
+const personaTier = ref(1)
+const intimacy = ref(0)
 const messages = ref([])
 const asrPartial = ref('')
 const llmPartial = ref('')
@@ -187,9 +191,7 @@ ws.on('llm_done', () => {
   if (llmPartial.value) {
     // 兜底：移除可能泄露的情感标签
     const cleaned = formatSpacing(
-      llmPartial.value
-        .replace(/<好感(?:变化)?[：:]\s*[+-]?\d+>/g, '')
-        .replace(/<信任(?:变化)?[：:]\s*[+-]?\d+>/g, '')
+      llmPartial.value.replace(/<emotion:\s*[^>]*>/g, '')
     ).trim()
     messages.value.push({ role: 'assistant', text: cleaned || llmPartial.value, interrupted: false, msgId: ++_msgIdCounter })
     currentAiMsgIdx = messages.value.length - 1
@@ -211,9 +213,20 @@ ws.on('tts_end', () => {
 })
 
 ws.on('emotion', (msg) => {
-  console.log(`[情感] 好感度: ${msg.affection}, 信任度: ${msg.trust}`)
-  affection.value = msg.affection
-  trust.value = msg.trust
+  console.log('[情感] 多维情绪:', msg)
+  emotions.joy = msg.joy ?? 0
+  emotions.sadness = msg.sadness ?? 0
+  emotions.anger = msg.anger ?? 0
+  emotions.fear = msg.fear ?? 0
+  emotions.love = msg.love ?? 0
+  emotions.surprise = msg.surprise ?? 0
+  emotions.trust = msg.trust ?? 0
+})
+
+ws.on('persona_tier', (msg) => {
+  console.log('[角色] 人设切换:', msg)
+  personaTier.value = msg.tier ?? 1
+  intimacy.value = msg.intimacy ?? 0
 })
 
 ws.on('error', (msg) => {
@@ -336,6 +349,11 @@ function handleMicEnabledUpdate(val) {
     mic.stop()
     ws.send({ type: 'stop_voice' })
   }
+}
+
+function handleTtsEnabledUpdate(val) {
+  settings.ttsEnabled.value = val
+  syncConfig()
 }
 
 function handleModelConfigUpdate({ key, value }) {
