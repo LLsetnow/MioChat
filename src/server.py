@@ -100,7 +100,7 @@ class VoiceChatSession:
         self.llm_base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
         self.tts_model = os.environ.get("QWEN_TTS_MODEL", "cosyvoice-v3-flash")
         self.tts_api_key = os.environ.get("QWEN_TTS_API_KEY", "")
-        self.tts_voice = os.environ.get("VOICE_ID1", "").split("#")[0].strip() or "longhuhu_v3"
+        self.tts_voice = "longhuhu_v3"
         self.tts_instruction = ""
 
         # 打断控制
